@@ -85,6 +85,28 @@ class BookingRepository extends BaseRepository
         return ['emergencyJobs' => $emergencyJobs, 'noramlJobs' => $noramlJobs, 'cuser' => $cuser, 'usertype' => $usertype];
     }
 
+    public function getUsersJobByJobId($userId, $jobId)
+    {
+        $currentUser = User::find($userId);
+        $userType = '';
+        $emergencyJobs = array();
+        $noramlJobs = array();
+        if ($currentUser && $currentUser->is('customer')) {
+            $job = $currentUser->jobs()
+                            ->with('user.userMeta', 'user.average', 'translatorJobRel.user.average', 'language', 'feedback')
+                            ->where('job_id',$jobId)
+                            ->whereIn('status', ['pending', 'assigned', 'started'])
+                            ->orderBy('due', 'asc')->get();
+            $userType = 'customer';
+        } elseif ($currentUser && $currentUser->is('translator')) {
+            $job = Job::getTranslatorJobs($currentUser->id, 'new');
+            $job = $job->pluck('jobs')->where('job_id', $jobId)->first();
+            $userType = 'translator';
+        }
+
+        return ['job' => $job, 'currentUser' => $currentUser, 'userType' => $userType];
+    }
+
     /**
      * @param $user_id
      * @return array
@@ -133,58 +155,7 @@ class BookingRepository extends BaseRepository
         if ($user->user_type == env('CUSTOMER_ROLE_ID')) {
             $cuser = $user;
 
-            if (!isset($data['from_language_id'])) {
-                $response['status'] = 'fail';
-                $response['message'] = "Du måste fylla in alla fält";
-                $response['field_name'] = "from_language_id";
-                return $response;
-            }
-            if ($data['immediate'] == 'no') {
-                if (isset($data['due_date']) && $data['due_date'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "due_date";
-                    return $response;
-                }
-                if (isset($data['due_time']) && $data['due_time'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "due_time";
-                    return $response;
-                }
-                if (!isset($data['customer_phone_type']) && !isset($data['customer_physical_type'])) {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste göra ett val här";
-                    $response['field_name'] = "customer_phone_type";
-                    return $response;
-                }
-                if (isset($data['duration']) && $data['duration'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "duration";
-                    return $response;
-                }
-            } else {
-                if (isset($data['duration']) && $data['duration'] == '') {
-                    $response['status'] = 'fail';
-                    $response['message'] = "Du måste fylla in alla fält";
-                    $response['field_name'] = "duration";
-                    return $response;
-                }
-            }
-            if (isset($data['customer_phone_type'])) {
-                $data['customer_phone_type'] = 'yes';
-            } else {
-                $data['customer_phone_type'] = 'no';
-            }
-
-            if (isset($data['customer_physical_type'])) {
-                $data['customer_physical_type'] = 'yes';
-                $response['customer_physical_type'] = 'yes';
-            } else {
-                $data['customer_physical_type'] = 'no';
-                $response['customer_physical_type'] = 'no';
-            }
+            //Data should be validated in request 
 
             if ($data['immediate'] == 'yes') {
                 $due_carbon = Carbon::now()->addMinute($immediatetime);
@@ -1634,6 +1605,7 @@ class BookingRepository extends BaseRepository
 
         $tr = $job->translatorJobRel()->where('completed_at', Null)->where('cancel_at', Null)->first();
 
+        // Sholuld be in service
         Event::fire(new SessionEnded($job, ($post_data['user_id'] == $job->user_id) ? $tr->user_id : $job->user_id));
 
         $user = $tr->user()->first();
@@ -2105,6 +2077,10 @@ class BookingRepository extends BaseRepository
     public function ignoreThrottle($id)
     {
         $throttle = Throttles::find($id);
+        //Misssing Null check pointer
+        if(!$throttle){
+            throw new Exception("record not found", 404);
+        }
         $throttle->ignore = 1;
         $throttle->save();
         return ['success', 'Changes saved'];
@@ -2112,8 +2088,10 @@ class BookingRepository extends BaseRepository
 
     public function reopen($request)
     {
-        $jobid = $request['jobid'];
-        $userid = $request['userid'];
+        //Misssing Null check pointer
+
+        $jobid = isset($request['jobid']) ? $request['jobid'] : throw new Exception("jobid is reqired", 422);
+        $userid = isset($request['userid']) ? $request['userid'] : throw new Exception("userid is reqired", 422);
 
         $job = Job::find($jobid);
         $job = $job->toArray();

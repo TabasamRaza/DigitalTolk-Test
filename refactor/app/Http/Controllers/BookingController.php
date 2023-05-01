@@ -2,6 +2,8 @@
 
 namespace DTApi\Http\Controllers;
 
+use App\Http\Controllers\Accounts\Requests\CreateJobRequest;
+use App\Http\Controllers\Requests\UpdateJobRequest;
 use DTApi\Models\Job;
 use DTApi\Http\Requests;
 use DTApi\Models\Distance;
@@ -35,14 +37,17 @@ class BookingController extends Controller
      */
     public function index(Request $request)
     {
-        if($user_id = $request->get('user_id')) {
-
-            $response = $this->repository->getUsersJobs($user_id);
-
-        }
-        elseif($request->__authenticatedUser->user_type == env('ADMIN_ROLE_ID') || $request->__authenticatedUser->user_type == env('SUPERADMIN_ROLE_ID'))
+        $response = []; // If both conditions fails then we need to set some default 
+        //This was is potential data leakage 
+        //if i have some other user id then i can send that instead of mine 
+        //So i can see others data 
+        //so for this we should get user_id from __authenticatedUser
+        //in this case that can be $userId = $request->__authenticatedUser->id
+        if($request->__authenticatedUser->user_type == env('ADMIN_ROLE_ID') || $request->__authenticatedUser->user_type == env('SUPERADMIN_ROLE_ID'))
         {
             $response = $this->repository->getAll($request);
+        }else{
+            $response = $this->repository->getUsersJobs($request->__authenticatedUser->id);
         }
 
         return response($response);
@@ -54,8 +59,12 @@ class BookingController extends Controller
      */
     public function show($id)
     {
-        $job = $this->repository->with('translatorJobRel.user')->find($id);
-
+        //$job = $this->repository->with('translatorJobRel.user')->find($id);
+        //This is potential data leakage too
+        //if i have some other user bookingIds i can send that instead of mine 
+        //So i can see others data 
+        //so to tackle this we should create new method which will get loggedInUser and bookingId  
+        $job = $this->repository->getUsersJobByJobId(request()->__authenticatedUser, $id);
         return response($job);
     }
 
@@ -63,8 +72,10 @@ class BookingController extends Controller
      * @param Request $request
      * @return mixed
      */
-    public function store(Request $request)
+    public function store(CreateJobRequest $request)
     {
+        //request should be responsible for data validation
+
         $data = $request->all();
 
         $response = $this->repository->store($request->__authenticatedUser, $data);
@@ -78,8 +89,10 @@ class BookingController extends Controller
      * @param Request $request
      * @return mixed
      */
-    public function update($id, Request $request)
+    public function update($id, UpdateJobRequest $request)
     {
+        //request should be responsible for data validation
+
         $data = $request->all();
         $cuser = $request->__authenticatedUser;
         $response = $this->repository->updateJob($id, array_except($data, ['_token', 'submit']), $cuser);
@@ -93,6 +106,8 @@ class BookingController extends Controller
      */
     public function immediateJobEmail(Request $request)
     {
+        // Request should be responsible for data validation
+        // Service should be used for business logic  
         $adminSenderEmail = config('app.adminemail');
         $data = $request->all();
 
@@ -195,7 +210,8 @@ class BookingController extends Controller
     public function distanceFeed(Request $request)
     {
         $data = $request->all();
-
+        // this all should be handled in request
+         
         if (isset($data['distance']) && $data['distance'] != "") {
             $distance = $data['distance'];
         } else {
